@@ -5,7 +5,7 @@ use std::{
 
 use anyhow::{Context, Result};
 pub use iroh::NodeId;
-use iroh::{endpoint::RemoteInfo, protocol::Router, PublicKey, SecretKey};
+use iroh::{endpoint::RemoteInfo, protocol::Router, Endpoint, PublicKey, SecretKey};
 use iroh_base::{ticket::Ticket, Signature};
 use iroh_gossip::net::{Gossip, GossipEvent, GossipSender, GOSSIP_ALPN};
 pub use iroh_gossip::proto::TopicId;
@@ -71,28 +71,29 @@ impl ChatNode {
     /// Spawns a gossip node.
     pub async fn spawn(secret_key: Option<SecretKey>) -> Result<Self> {
         let secret_key = secret_key.unwrap_or_else(|| SecretKey::generate(rand::rngs::OsRng));
-        let endpoint = iroh::Endpoint::builder()
+        let endpoint = iroh::endpoint::Endpoint::builder()
             .secret_key(secret_key.clone())
             .discovery_n0()
             .alpns(vec![GOSSIP_ALPN.to_vec()])
             .bind()
             .await?;
 
-        let node_id = endpoint.node_id();
-        info!("endpoint bound");
-        info!("node id: {node_id:#?}");
+        Self::spawn_router(endpoint).await
+    }
 
+    pub async fn spawn_router(endpoint: Endpoint) -> Result<Self> {
+        let secret_key = endpoint.secret_key().clone();
         let gossip = Gossip::builder().spawn(endpoint.clone()).await?;
         info!("gossip spawned");
+
         let router = Router::builder(endpoint)
             .accept(GOSSIP_ALPN, gossip.clone())
-            .spawn()
-            .await?;
-        info!("router spawned");
+            .spawn();
+
         Ok(Self {
-            gossip,
             router,
             secret_key,
+            gossip,
         })
     }
 
@@ -354,4 +355,19 @@ pub struct ReceivedMessage {
     timestamp: u64,
     from: NodeId,
     message: Message,
+}
+
+#[cfg(feature = "n0des")]
+pub mod n0des {
+    pub use crate::ChatNode as N0de;
+
+    impl iroh_n0des::N0de for N0de {
+        async fn spawn(endpoint: iroh::endpoint::Endpoint) -> anyhow::Result<Self> {
+            Self::spawn_router(endpoint).await
+        }
+
+        async fn shutdown(&mut self) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
 }
