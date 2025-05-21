@@ -1,2 +1,3 @@
 [build]
 package = "shared"
+features = ["n0des"]
